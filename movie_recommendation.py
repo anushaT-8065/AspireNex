@@ -6,62 +6,65 @@ import pickle
 from nltk.stem.porter import PorterStemmer
 import streamlit as st
 
-df=pd.read_csv("/Users/anushatiwari/Downloads/tmdb_movies_data-2.csv")
+@st.cache_data
+def load_data():
 
-#Columns
-mov=df[['id','cast','director','genres','overview','original_title','keywords']]
+    df=pd.read_csv("/Users/anushatiwari/Downloads/tmdb_movies_data-2.csv")
 
-mov=mov.dropna()
+    #Columns
+    mov=df[['id','cast','director','genres','overview','original_title','keywords']]
 
-def std_form(obj):
-    s=list(obj)
-    for a in range(len(s)):
-        if s[a]=='|':
-            s[a]==" "
-    temp = "".join(s)
-    temp_lst=temp.split()
-    return temp_lst
+    mov=mov.dropna()
 
-mov.loc[:,'genres']=mov['genres'].apply(convert)
-mov.loc[:,'keywords']=mov['keywords'].apply(convert)
-mov.loc[:,'cast']=mov['cast'].apply(convert)
-mov.loc[:,'director']=mov['director'].apply(convert)
-mov.loc[:,'overview']=mov['overview'].apply(lambda i: i.split())
+    def std_form(obj):
+        return obj.replace("|", " ").split()
 
-ps=PorterStemmer()
-def stem(text):
-    return " ".join([ps.stem(word) for word in text.split()])
+    mov.loc[:,'genres']=mov['genres'].apply(std_form)
+    mov.loc[:,'keywords']=mov['keywords'].apply(std_form)
+    mov.loc[:,'cast']=mov['cast'].apply(std_form)
+    mov.loc[:,'director']=mov['director'].apply(std_form)
+    mov.loc[:,'overview']=mov['overview'].apply(lambda i: i.split())
 
-mov.loc[:,'genres']=mov['genres'].apply(lambda i: " ".join([ps.stem(e) for e in i]))
-mov.loc[:,'keywords']=mov['keywords'].apply(lambda i: " ".join([ps.stem(e) for e in i]))
-mov.loc[:,'overview']=mov['overview'].apply(lambda i: " ".join([ps.stem(e) for e in i]))
-mov.loc[:,'cast']=mov['cast'].apply(lambda i: " ".join([ps.stem(e) for e in i]))
-mov.loc[:,'director']=mov['director'].apply(lambda i: " ".join([ps.stem(e) for e in i]))
 
-mov.loc[:, 'tags'] = mov['cast']+mov['genres']+mov['director'] + mov['overview'] + mov['keywords']
+    ps=PorterStemmer()
+    def stem(text):
+        return " ".join([ps.stem(word) for word in text.split()])
 
-df2=mov[['id','original_title','tags']].copy()
-df2.loc[:,'tags']=df2['tags'].apply(lambda x: " ".join(x.split()))
-df2.loc[:,'tags']=df2['tags'].apply(stem)
+    mov['gen_stem'] = mov['genres'].apply(lambda i: " ".join([ps.stem(e) for e in i]))
+    mov['key_stem'] = mov['keywords'].apply(lambda i: " ".join([ps.stem(e) for e in i]))
+    mov['over_stem'] = mov['overview'].apply(lambda i: " ".join([ps.stem(e) for e in i]))
+    mov['cast_stem'] = mov['cast'].apply(lambda i: " ".join([ps.stem(e) for e in i]))
+    mov['dir_stem'] = mov['director'].apply(lambda i: " ".join([ps.stem(e) for e in i]))
 
-cnt_vec=cv(max_faetures=10000, stop_words = 'english')
-vec=cnt_vec.fit_transform(df2['tags']).toarray()
+    mov['tags'] = (mov['cast_stem'] + " " + mov['gen_stem'] + " " +
+    mov['dir_stem'] + " " + mov['over_stem'] + " " + mov['key_stem'])
 
-sim=cosine_similarity(vec)
+    df2 = mov[['id', 'original_title', 'tags']].copy()
+    df2['tags'] = df2['tags'].apply(lambda x: " ".join(x.split()))
+    df2['tags'] = df2['tags'].apply(lambda x: " ".join([ps.stem(word) for word in x.split()]))
+    
+    cnt_vec=cv(max_features=10000, stop_words = 'english')
+    vec=cnt_vec.fit_transform(df2['tags']).toarray()
 
-pickle.dump(df2,open('mov.pkl','wb'))
-pickle.dump(df2.to_dict(),open('mov_dict.pkl','wb'))
-pickle.dump(sim,open('sim.pkl','wb'))
+    sim=cosine_similarity(vec)
+
+    pickle.dump(df2,open('mov.pkl','wb'))
+    pickle.dump(df2.to_dict(),open('mov_dict.pkl','wb'))
+    pickle.dump(sim,open('sim.pkl','wb'))
+    
+    return df2,sim,mov
+
+df2, sim,mov = load_data()
 
 def recom(movie):
     ind=df2[df2['original_title']==movie].index[0]
     dist=sim[ind]
-    mov_lst=sorted(list(ennumerate(dist)),reverse=True,key=lambda y: y[1])[1:6]
+    mov_lst=sorted(list(enumerate(dist)),reverse=True,key=lambda y: y[1])[1:6]
 
     rec_mov=[]
     rec_gen=[]
 
-    for i mov_lst:
+    for i in mov_lst:
         rec_mov.append(mov.iloc[i[0]].original_title)
         rec_gen.append(mov.iloc[i[0]].genres)
     
@@ -69,25 +72,31 @@ def recom(movie):
 
 #loading
 mov_dict=pickle.load(open('mov_dict.pkl','rb'))
-df2=pd.Dataframe(mov_dict)
+df2=pd.DataFrame(mov_dict)
 sim=pickle.load(open('sim.pkl','rb'))
 
-st.title("Movie Recommendation System")
-st.markdown("""
-<style>
-.stApp{
-    background-image: url("https://images.unsplash.com/photo-1478720568477-152d9b164e26?w=900&auto=format&fit=crop&q=60&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8NHx8bW92aWV8ZW58MHx8MHx8fDA%3D");
-    background-size: cover;
-}
-</style>
-""",
-unsafe_allow_html=True)
+st.markdown("<h1 style='color: white; font-weight: bold;'>Movie Recommender System</h1>", unsafe_allow_html=True)
 
-sel_mov=st.selectbox('Select a movie so that we recommend you more like it',df2['original_title'].values)
+st.markdown("<p style='color: white; margin-bottom: 0;'>Select a movie to recommend</p>", unsafe_allow_html=True)
+sel_movie_name = st.selectbox(
+    '',
+    df2['original_title'].values)
+
 
 if st.button('Recommend'):
-    n1,g1 = recom(sel_mov)
-    for n,g in zip(n1,g1):
-        st.write("Movie name: {n} Genre: {g}")
+    names, genres = recom(sel_movie_name)
 
-
+    for name, genre in zip(names, genres):
+        
+        st.markdown(f'<div style="background-color:#808080; border-radius:5px;">{name} - {genre}</div>', unsafe_allow_html=True)
+st.markdown(
+    """
+    <style>
+    .stApp {
+        background-image: url("https://images.unsplash.com/photo-1478720568477-152d9b164e26?w=900&auto=format&fit=crop&q=60&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8NHx8bW92aWV8ZW58MHx8MHx8fDA%3D");
+        background-size: cover;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
